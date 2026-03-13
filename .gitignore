@@ -1,0 +1,18 @@
+# Database (contains encryption passwords — keep out of git)
+iphonetools.db
+
+# Backups (large binary files)
+backups/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# OS
+.DS_Store

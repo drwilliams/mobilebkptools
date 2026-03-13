@@ -1,0 +1,4 @@
+pymobiledevice3>=4.0.0
+iphone-backup-decrypt>=0.6.0
+click>=8.0.0
+rich>=13.0.0
