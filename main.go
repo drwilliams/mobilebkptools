@@ -19,6 +19,9 @@ func main() {
 		cmdListBackups(),
 		cmdListApps(),
 		cmdExtractTexts(),
+		cmdShowLayout(),
+		cmdExportLayout(),
+		cmdImportLayout(),
 	)
 	if err := root.Execute(); err != nil {
 		os.Exit(1)

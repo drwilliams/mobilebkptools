@@ -12,6 +12,7 @@ import (
 	"howett.net/plist"
 )
 
+
 // Keybag holds per-class AES keys derived from the backup password.
 type Keybag struct {
 	classKeys map[uint32][]byte
@@ -161,6 +162,23 @@ func aesKeyUnwrap(kek, data []byte) ([]byte, error) {
 		copy(out[(i-1)*8:], r[i])
 	}
 	return out, nil
+}
+
+// stripPKCS7 removes PKCS#7 padding from decrypted data.
+func stripPKCS7(data []byte) []byte {
+	if len(data) == 0 {
+		return data
+	}
+	pad := int(data[len(data)-1])
+	if pad == 0 || pad > aes.BlockSize || pad > len(data) {
+		return data
+	}
+	for _, b := range data[len(data)-pad:] {
+		if int(b) != pad {
+			return data
+		}
+	}
+	return data[:len(data)-pad]
 }
 
 // decryptAESCBC decrypts ciphertext with AES-CBC using a zero IV.
