@@ -22,6 +22,8 @@ func main() {
 		cmdShowLayout(),
 		cmdExportLayout(),
 		cmdImportLayout(),
+		cmdListBackupApps(),
+		cmdPruneApps(),
 	)
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
