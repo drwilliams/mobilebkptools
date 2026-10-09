@@ -47,7 +47,7 @@ Connects to the device, generates a random 32-character hex encryption password,
 
 **Notes:**
 - iOS keeps a single backup password per device. Once encryption is enabled, all subsequent backups use the same password until it is changed.
-- If the device already has a backup password set (i.e. you previously ran `backup`), the tool will detect this and proceed using the existing password. The newly generated password stored in the DB will **not** match — you must manually update the `encryption_password` column in `iphonetools.db` to the correct value before extracting data.
+- If the device already has a backup password set, the tool reuses the latest password stored for that device. If none is stored, use `set-password <BACKUP_ID>` after the backup to record the correct password before extracting data.
 - The actual backup files are standard iTunes-format encrypted backups and can be verified with any tool that supports them.
 
 ---
@@ -59,6 +59,16 @@ python3 main.py list-backups
 ```
 
 Prints a table of all backups recorded in `iphonetools.db`, including the numeric ID used by other commands, device name, iOS version, UDID, creation timestamp, and backup path.
+
+---
+
+### `set-password` — Update a stored backup password
+
+```bash
+python3 main.py set-password <BACKUP_ID>
+```
+
+Find the backup ID with `list-backups`. Enter the existing encryption password (for example, the one set in Finder) and enter it again to confirm. Input is hidden, and the password is stored only for the selected backup in `iphonetools.db`. This command does not change the device's encryption password or verify that the password decrypts the backup.
 
 ---
 

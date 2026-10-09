@@ -5,6 +5,7 @@ iphonetools — Create and inspect encrypted iPhone/iPad backups.
 Usage:
     python main.py backup              # Back up connected device
     python main.py list-backups        # Show all stored backups
+    python main.py set-password <ID>   # Update a stored backup password
     python main.py list-apps <ID>      # List apps from backup #ID
     python main.py extract-texts <ID>  # Extract SMS/iMessages from backup #ID
 """
@@ -66,6 +67,25 @@ def list_backups():
         )
 
     console.print(table)
+
+
+@cli.command('set-password')
+@click.argument('backup_id', type=click.IntRange(min=1))
+def set_password(backup_id):
+    """Update the database password for BACKUP_ID from 'list-backups'.
+
+    This does not change the device's backup encryption password.
+    """
+    from db import get_backup_by_id, update_backup_password
+
+    if not get_backup_by_id(backup_id):
+        raise click.ClickException(f'No backup with ID {backup_id}.')
+
+    password = click.prompt('Backup encryption password', hide_input=True,
+                            confirmation_prompt=True)
+    if not update_backup_password(backup_id, password):
+        raise click.ClickException(f'No backup with ID {backup_id}.')
+    console.print(f'[green]Updated stored password for backup {backup_id}.[/green]')
 
 
 @cli.command('list-apps')

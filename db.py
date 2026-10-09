@@ -51,5 +51,26 @@ def get_backup_by_id(backup_id):
         return dict(row) if row else None
 
 
+def update_backup_password(backup_id, password):
+    with get_connection() as conn:
+        cursor = conn.execute(
+            'UPDATE backups SET encryption_password = ? WHERE id = ?',
+            (password, backup_id),
+        )
+        return cursor.rowcount > 0
+
+
+def get_latest_password_for_device(device_udid):
+    with get_connection() as conn:
+        row = conn.execute(
+            '''SELECT encryption_password FROM backups
+               WHERE device_udid = ? AND encryption_password != ''
+               ORDER BY created_at DESC, id DESC
+               LIMIT 1''',
+            (device_udid,),
+        ).fetchone()
+        return row['encryption_password'] if row else None
+
+
 # Initialize DB on import
 init_db()
