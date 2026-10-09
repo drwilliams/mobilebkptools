@@ -11,9 +11,11 @@ Usage:
 """
 
 import sys
+from pathlib import Path
 import click
 from rich.console import Console
 from rich.table import Table
+from rich.text import Text
 
 console = Console()
 
@@ -22,6 +24,13 @@ console = Console()
 def cli():
     """iOS Backup Tool — create encrypted backups and extract data from them."""
     pass
+
+
+@cli.command('gui')
+def gui():
+    """Open the desktop interface."""
+    from gui import main
+    main()
 
 
 @cli.command()
@@ -67,6 +76,61 @@ def list_backups():
         )
 
     console.print(table)
+
+
+@cli.command('scan-backups')
+@click.argument('paths', nargs=-1, type=click.Path(exists=True, file_okay=False, path_type=Path))
+@click.option('--json', 'json_output', is_flag=True, help='Emit discoveries as JSON lines.')
+def scan_backups(paths, json_output):
+    """Find local iPhone/iPad backups under PATHS.
+
+    Defaults to ~/Library/Application Support/MobileSync/Backup on macOS,
+    or the home folder on other systems.
+
+    Discovery is read-only and does not register backups in the database.
+    """
+    from scan_backups import scan_backups as discover
+
+    default_root = Path.home()
+    if sys.platform == 'darwin':
+        default_root /= 'Library/Application Support/MobileSync/Backup'
+    roots = paths or (default_root,)
+    if not json_output:
+        console.print('Scanning: ' + ', '.join(str(path) for path in roots), markup=False)
+    errors = []
+    table = Table(title='Discovered Backups')
+    for column in ('Device', 'iOS', 'Backup date', 'Encrypted', 'Path'):
+        table.add_column(column, overflow='fold')
+    for result in discover(roots, errors.append):
+        if json_output:
+            import json
+            click.echo(json.dumps(result))
+            continue
+        table.add_row(*(Text(result[key]) for key in ('device', 'ios', 'date', 'encrypted', 'path')))
+    if json_output:
+        if errors:
+            click.echo(f'Skipped {len(errors)} inaccessible folders or unreadable metadata files.', err=True)
+        return
+    if table.row_count:
+        console.print(table)
+    else:
+        console.print('No backups found in the accessible folders.')
+    if errors:
+        console.print(f'Skipped {len(errors)} inaccessible folders or unreadable backup metadata files. '
+                      'On macOS, Terminal may need Full Disk Access to scan protected folders.')
+
+
+@cli.command('import-backup')
+@click.argument('path', type=click.Path(exists=True, file_okay=False, path_type=Path))
+def import_backup(path):
+    """Register an existing backup folder without copying its files."""
+    from db import import_backup as register
+    try:
+        backup_id, created = register(path)
+    except (OSError, ValueError) as error:
+        raise click.ClickException(str(error)) from error
+    click.echo(f'{"Imported" if created else "Already registered"} backup {backup_id}.')
+    click.echo('For encrypted backups, use set-password to store the existing password before extracting messages.')
 
 
 @cli.command('set-password')

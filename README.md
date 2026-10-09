@@ -1,6 +1,6 @@
 # iphonetools
 
-A Python CLI for creating encrypted backups of iPhones and iPads, and extracting data from them.
+A Python desktop app and CLI for creating encrypted backups of iPhones and iPads, and extracting data from them.
 
 ## Requirements
 
@@ -28,6 +28,50 @@ pip install -r requirements.txt
 1. Connect the device via USB.
 2. On the device, tap **Trust** when prompted.
 3. If you have never trusted this machine before, you may need to unlock the device first.
+
+## Desktop GUI
+
+Run from a desktop session with the same Python environment used for the CLI:
+
+```bash
+python3 main.py gui
+# Or launch directly:
+python3 gui.py
+```
+
+The window lists saved backups and provides full or incremental backup creation,
+app listings, message viewing, CSV export, and a masked password editor. Select a
+backup before inspecting it or updating its stored password. The message limit
+applies to both viewing and CSV export. Results and command errors appear in the
+activity panel; backup and extraction commands run in the background so the
+window remains responsive. Wait for an operation to finish before closing.
+
+Use **Scan for backups** to search the Finder backup folder on macOS or your home
+folder on other systems. **Scan a folder…** lets you choose another folder or
+mounted drive. Scans run in the background and open a results window. Select one
+or more results and click **Import selected backups** to add them to the saved
+list. Import registers files in place without copying them and skips backups
+already registered. Keep imported backup folders accessible at their original
+paths. For encrypted backups, use **Set password** with the existing backup
+password before extracting messages. Message extraction currently supports
+encrypted backups; unencrypted and older-format backups can be registered but
+may not support all inspection tools.
+
+The GUI uses Tkinter, which is supplied separately by some Python distributions:
+
+```bash
+# Fedora
+sudo dnf install python3-tkinter
+# Ubuntu / Debian
+sudo apt install python3-tk
+```
+
+On macOS, use a Python installation with Tk support. Tkinter is a system Python
+component, not a package installed by `pip install -r requirements.txt`.
+
+The GUI uses the same local database and backup folders as the CLI. Stored backup
+passwords are plaintext in SQLite; protect access to the project directory. The
+GUI masks password input and hides generated passwords from its activity panel.
 
 ## Commands
 
@@ -59,6 +103,44 @@ python3 main.py list-backups
 ```
 
 Prints a table of all backups recorded in `iphonetools.db`, including the numeric ID used by other commands, device name, iOS version, UDID, creation timestamp, and backup path.
+
+---
+
+### `scan-backups` — Find existing iPhone and iPad backups
+
+```bash
+# Search the standard Finder backup folder on macOS (home folder elsewhere)
+python3 main.py scan-backups
+
+# Search specific folders, other user folders, or mounted drives
+python3 main.py scan-backups /Users /Volumes
+```
+
+With no paths supplied, macOS uses
+`~/Library/Application Support/MobileSync/Backup`; other systems use your home
+folder. Supplying paths overrides this default.
+
+Recursively finds standard iTunes-format backup folders using their metadata and
+manifest files. Displays device name, iOS version, backup date, encryption status,
+and path. The scan is read-only and does not add backups to the local database.
+It does not follow directory symlinks. Inaccessible folders and unreadable metadata
+are skipped and counted; macOS may require Full Disk Access for your terminal to
+search protected folders. Large folder trees can take time to scan. This finds
+local backups, not backups stored only in iCloud.
+
+---
+
+### `import-backup` — Register an existing backup folder
+
+```bash
+python3 main.py import-backup "/path/to/MobileSync/Backup/device-backup-folder"
+```
+
+Supply the individual folder containing `Info.plist`, `Manifest.plist`, and
+`Manifest.db` (or an older `Manifest.mbdb`). Import records device metadata and
+the backup date in the local database without copying files. Importing the same
+folder again returns its existing ID and preserves any stored password.
+For encrypted backups, run `set-password <BACKUP_ID>` afterward.
 
 ---
 
@@ -150,6 +232,7 @@ sqlite3 iphonetools.db "SELECT id, device_name, ios_version, created_at FROM bac
 ```
 iphonetools/
 ├── main.py             # CLI entry point
+├── gui.py              # Tkinter desktop interface
 ├── db.py               # SQLite helper (auto-creates iphonetools.db on first run)
 ├── device_backup.py    # Backup creation via pymobiledevice3
 ├── extract_sms.py      # SMS/iMessage extraction via iphone-backup-decrypt

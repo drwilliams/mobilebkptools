@@ -45,6 +45,28 @@ def get_all_backups():
         return [dict(row) for row in rows]
 
 
+def import_backup(backup_path):
+    """Register an existing backup in place; return (ID, newly imported)."""
+    from scan_backups import read_backup
+    metadata = read_backup(backup_path)
+    path = Path(metadata['path'])
+    with get_connection() as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        for row in conn.execute('SELECT id, backup_path FROM backups'):
+            if Path(row['backup_path']).resolve() == path:
+                return row['id'], False
+        cursor = conn.execute(
+            '''INSERT INTO backups
+               (device_udid, device_name, product_type, ios_version,
+                backup_path, encryption_password, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))''',
+            (metadata['udid'], metadata['device'], metadata['product_type'],
+             metadata['ios'], str(path), '',
+             None if metadata['date'] == '?' else metadata['date']),
+        )
+        return cursor.lastrowid, True
+
+
 def get_backup_by_id(backup_id):
     with get_connection() as conn:
         row = conn.execute('SELECT * FROM backups WHERE id = ?', (backup_id,)).fetchone()
