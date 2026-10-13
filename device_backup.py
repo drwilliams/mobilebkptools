@@ -2,6 +2,7 @@ import asyncio
 import inspect
 import secrets
 import plistlib
+from contextlib import asynccontextmanager
 from pathlib import Path
 from datetime import datetime
 from rich.console import Console
@@ -9,6 +10,52 @@ from rich.console import Console
 console = Console()
 
 BACKUPS_DIR = Path(__file__).parent / 'backups'
+DEVICE_PASSCODE_TIMEOUT = 300
+
+
+@asynccontextmanager
+async def _backup_lock(afc, notification_proxy):
+    """Allow time for the device passcode instead of the library's 10 seconds."""
+    from pymobiledevice3.exceptions import AfcException
+    from pymobiledevice3.services.afc import AFC_LOCK_EX, AFC_LOCK_UN, AfcError
+    from pymobiledevice3.services.mobilebackup2 import (
+        NP_SYNC_WILL_START, NP_SYNC_LOCK_REQUEST, NP_SYNC_DID_START,
+        NP_SYNC_DID_FINISH,
+    )
+
+    await notification_proxy.notify_post(NP_SYNC_WILL_START)
+    lockfile = await afc.fopen('/com.apple.itunes.lock_sync', 'r+')
+    acquired = False
+    try:
+        if lockfile:
+            await notification_proxy.notify_post(NP_SYNC_LOCK_REQUEST)
+            console.print('[cyan]Unlock the device and enter its passcode if prompted. Waiting up to 5 minutes...[/cyan]')
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + DEVICE_PASSCODE_TIMEOUT
+            while True:
+                try:
+                    await afc.lock(lockfile, AFC_LOCK_EX)
+                except AfcException as error:
+                    if error.status != AfcError.OP_WOULD_BLOCK:
+                        raise
+                    remaining = deadline - loop.time()
+                    if remaining <= 0:
+                        raise TimeoutError('The device did not allow backup within 5 minutes. Unlock it, enter its passcode, and retry.') from error
+                    await asyncio.sleep(min(0.2, remaining))
+                else:
+                    acquired = True
+                    await notification_proxy.notify_post(NP_SYNC_DID_START)
+                    break
+        yield
+    finally:
+        try:
+            if acquired:
+                await afc.lock(lockfile, AFC_LOCK_UN)
+        finally:
+            if lockfile:
+                await afc.fclose(lockfile)
+            await notification_proxy.notify_post(NP_SYNC_DID_FINISH)
+
 
 
 def generate_password() -> str:
@@ -67,6 +114,8 @@ async def _create_backup_async(full: bool = True):
     # reopening MobileBackup2 immediately after checking encryption.
     try:
         async with MobileBackup2Service(lockdown) as service:
+            # Apply to this backup only; leave other services and jobs alone.
+            service._backup_lock = _backup_lock
             already_encrypted = await _maybe_await(
                 service.get_will_encrypt() if hasattr(service, 'get_will_encrypt') else service.will_encrypt
             )

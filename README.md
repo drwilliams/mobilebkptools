@@ -29,6 +29,10 @@ pip install -r requirements.txt
 2. On the device, tap **Trust** when prompted.
 3. If you have never trusted this machine before, you may need to unlock the device first.
 
+When starting a backup, unlock the device and enter its device passcode if prompted
+on its screen. The tool waits up to five minutes for the device's backup sync lock
+before timing out. This is separate from the backup encryption password.
+
 ## Desktop GUI
 
 Run from a desktop session with the same Python environment used for the CLI:
