@@ -2,6 +2,8 @@ import asyncio
 import inspect
 import secrets
 import plistlib
+import json
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from datetime import datetime
@@ -57,7 +59,6 @@ async def _backup_lock(afc, notification_proxy):
             await notification_proxy.notify_post(NP_SYNC_DID_FINISH)
 
 
-
 def generate_password() -> str:
     """Generate a cryptographically secure random backup password."""
     return secrets.token_hex(16)
@@ -70,26 +71,50 @@ async def _maybe_await(value):
     return value
 
 
-async def _create_backup_async(full: bool = True):
+async def list_connected_devices():
+    """Discover USB devices without prompting for pairing."""
+    from pymobiledevice3.usbmux import list_devices
+    from pymobiledevice3.lockdown import create_using_usbmux
+    devices = {}
+    for device in await _maybe_await(list_devices()):
+        if device.connection_type != 'USB' or device.serial in devices:
+            continue
+        row = {'udid': device.serial, 'name': 'iOS device', 'ios': '', 'status': 'Connected'}
+        lockdown = None
+        try:
+            lockdown = await asyncio.wait_for(_maybe_await(create_using_usbmux(
+                serial=device.serial, connection_type='USB', autopair=False)), timeout=5)
+            row['name'] = await _maybe_await(lockdown.get_value('', 'DeviceName'))
+            row['ios'] = await _maybe_await(lockdown.get_value('', 'ProductVersion'))
+        except Exception:
+            row['status'] = 'Unlock and trust this computer'
+        finally:
+            if lockdown is not None:
+                await _maybe_await(lockdown.close())
+        devices[device.serial] = row
+    return list(devices.values())
+
+
+async def _create_backup_async(full: bool = True, udid: str | None = None):
     """Connect to the iOS device and create an encrypted backup."""
     try:
         from pymobiledevice3.lockdown import create_using_usbmux
         from pymobiledevice3.services.mobilebackup2 import Mobilebackup2Service as MobileBackup2Service
     except ImportError:
         console.print("[red]pymobiledevice3 not installed. Run: pip install pymobiledevice3[/red]")
-        return
+        raise RuntimeError('pymobiledevice3 is not installed.')
 
-    from db import get_latest_password_for_device, store_backup
+    from db import get_latest_password_for_device, store_backup, save_device_password
 
     BACKUPS_DIR.mkdir(exist_ok=True)
 
     console.print("[cyan]Connecting to iOS device over USB...[/cyan]")
     try:
-        lockdown = await _maybe_await(create_using_usbmux())
+        lockdown = await _maybe_await(create_using_usbmux(serial=udid, connection_type='USB'))
     except Exception as e:
         console.print(f"[red]Failed to connect to device: {e}[/red]")
         console.print("[yellow]Ensure the device is connected via USB and has been trusted on this machine.[/yellow]")
-        return
+        raise RuntimeError('Unable to connect to the device.') from e
 
     device_udid = getattr(lockdown, 'identifier', None) or getattr(lockdown, 'udid', None)
     device_name = await _maybe_await(lockdown.get_value('', 'DeviceName'))
@@ -100,14 +125,12 @@ async def _create_backup_async(full: bool = True):
     console.print(f"[dim]UDID: {device_udid}[/dim]")
 
     # Create a timestamped session directory so each backup run is isolated
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f') + '_' + uuid.uuid4().hex[:8]
     session_dir = BACKUPS_DIR / timestamp
     session_dir.mkdir(parents=True, exist_ok=True)
 
-    password = generate_password()
-    backup_password = password
-    console.print(f"\n[cyan]Generated encryption password:[/cyan] {password}")
-    console.print("[dim](Stored securely in iphonetools.db)[/dim]\n")
+    password = ''
+    backup_password = ''
 
     # Check encryption state, then run the backup over the same service
     # connection. Newer pymobiledevice3/iOS combinations can time out when
@@ -122,6 +145,11 @@ async def _create_backup_async(full: bool = True):
             console.print(f"[dim]Device backup encryption currently: {'on' if already_encrypted else 'off'}[/dim]")
 
             if not already_encrypted:
+                password = generate_password()
+                backup_password = password
+                save_device_password(device_udid, device_name, password)
+                console.print(f"[cyan]Generated encryption password:[/cyan] {password}")
+                console.print("[dim]Password saved in iphonetools.db before enabling encryption.[/dim]")
                 console.print("[cyan]Enabling backup encryption on device...[/cyan]")
                 await _maybe_await(service.change_password(backup_directory=str(session_dir), old='', new=password))
                 console.print("[green]Encryption enabled.[/green]")
@@ -132,16 +160,21 @@ async def _create_backup_async(full: bool = True):
                     console.print("[green]Using stored password from iphonetools.db.[/green]")
                     backup_password = stored_password
                     password = stored_password
+                    save_device_password(device_udid, device_name, password)
                 else:
-                    console.print("[yellow]No stored password found; backup may require manual DB correction.[/yellow]")
+                    console.print("[yellow]No stored password found. This backup cannot be decrypted until the existing password is supplied.[/yellow]")
                     backup_password = ''
 
             backup_type = "full" if full else "incremental"
             console.print(f"\n[cyan]Starting {backup_type} backup → {session_dir}[/cyan]")
-            await _maybe_await(service.backup(full=full, backup_directory=str(session_dir), password=backup_password))
+            def progress(value):
+                print('BACKUP_PROGRESS ' + json.dumps(float(value)), flush=True)
+
+            await _maybe_await(service.backup(full=full, backup_directory=str(session_dir),
+                                            password=backup_password, progress_callback=progress))
     except Exception as e:
         console.print(f"[red]Backup failed: {repr(e)}[/red]")
-        return
+        raise RuntimeError('Backup failed; see the error above. Any generated password remains saved.') from e
 
     # Resolve the actual backup path (pymobiledevice3 nests it under the UDID)
     actual_backup_path = session_dir / device_udid
@@ -164,6 +197,6 @@ async def _create_backup_async(full: bool = True):
     console.print(f"  Password  : stored in iphonetools.db")
 
 
-def create_backup(full: bool = True):
+def create_backup(full: bool = True, udid: str | None = None):
     """Connect to the iOS device and create an encrypted backup."""
-    asyncio.run(_create_backup_async(full=full))
+    asyncio.run(_create_backup_async(full=full, udid=udid))

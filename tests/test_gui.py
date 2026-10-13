@@ -7,6 +7,18 @@ from gui import run_command
 
 
 class CommandRunnerTests(unittest.TestCase):
+    def test_progress_routes_percentage_without_logging_protocol(self):
+        events = queue.Queue()
+        process = MagicMock()
+        process.stdout = iter(['BACKUP_PROGRESS 42.5\n', 'Finishing backup\n'])
+        process.wait.return_value = 0
+        process.__enter__.return_value = process
+        with patch('gui.subprocess.Popen', return_value=process):
+            run_command(['backup'], events)
+        self.assertEqual(events.get_nowait(), ('progress', 42.5))
+        self.assertEqual(events.get_nowait(), ('output', 'Finishing backup\n'))
+        self.assertEqual(events.get_nowait(), ('done', 0))
+
     def test_scan_routes_discoveries_and_preserves_diagnostics(self):
         events = queue.Queue()
         process = MagicMock()

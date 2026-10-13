@@ -1,13 +1,20 @@
 import sqlite3
 from pathlib import Path
+from contextlib import contextmanager
 
 DB_PATH = Path(__file__).parent / 'iphonetools.db'
 
 
+@contextmanager
 def get_connection():
-    conn = sqlite3.connect(DB_PATH)
+    # Parallel backup processes may briefly contend when committing metadata.
+    conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
-    return conn
+    try:
+        with conn:
+            yield conn
+    finally:
+        conn.close()
 
 
 def init_db():
@@ -25,6 +32,29 @@ def init_db():
             )
         ''')
         conn.commit()
+        conn.execute('''CREATE TABLE IF NOT EXISTS device_passwords (
+            device_udid TEXT PRIMARY KEY,
+            device_name TEXT,
+            encryption_password TEXT NOT NULL,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )''')
+
+
+def save_device_password(device_udid, device_name, password):
+    """Persist credentials before sending an encryption change to the device."""
+    with get_connection() as conn:
+        conn.execute('''INSERT INTO device_passwords
+            (device_udid, device_name, encryption_password) VALUES (?, ?, ?)
+            ON CONFLICT(device_udid) DO UPDATE SET
+            device_name=excluded.device_name,
+            encryption_password=excluded.encryption_password,
+            updated_at=CURRENT_TIMESTAMP''', (device_udid, device_name, password))
+
+
+def get_saved_device_passwords():
+    with get_connection() as conn:
+        return [dict(row) for row in conn.execute(
+            'SELECT * FROM device_passwords ORDER BY updated_at DESC')]
 
 
 def store_backup(device_udid, device_name, product_type, ios_version, backup_path, encryption_password):
@@ -84,6 +114,10 @@ def update_backup_password(backup_id, password):
 
 def get_latest_password_for_device(device_udid):
     with get_connection() as conn:
+        saved = conn.execute('SELECT encryption_password FROM device_passwords WHERE device_udid = ?',
+                             (device_udid,)).fetchone()
+        if saved:
+            return saved['encryption_password']
         row = conn.execute(
             '''SELECT encryption_password FROM backups
                WHERE device_udid = ? AND encryption_password != ''

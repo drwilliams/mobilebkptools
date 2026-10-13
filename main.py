@@ -34,16 +34,33 @@ def gui():
 
 
 @cli.command()
+@click.option('--udid', help='Back up the USB device with this identifier.')
 @click.option('--incremental', is_flag=True, default=False,
               help='Perform an incremental backup instead of a full one.')
-def backup(incremental):
+def backup(incremental, udid):
     """Create an encrypted backup of the connected iOS device.
 
     Generates a random encryption password, sets it on the device,
     runs the backup, and stores the password in iphonetools.db.
     """
     from device_backup import create_backup
-    create_backup(full=not incremental)
+    try:
+        create_backup(full=not incremental, udid=udid)
+    except RuntimeError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
+@cli.command('list-devices')
+def list_devices():
+    """List connected USB devices as JSON."""
+    import asyncio
+    import json
+    from device_backup import list_connected_devices
+    try:
+        click.echo(json.dumps(asyncio.run(list_connected_devices())))
+    except Exception as exc:
+        detail = str(exc) or type(exc).__name__
+        raise click.ClickException(f'Cannot discover devices: {detail}. Check that usbmuxd is running.') from exc
 
 
 @cli.command('list-backups')

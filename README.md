@@ -50,6 +50,14 @@ applies to both viewing and CSV export. Results and command errors appear in the
 activity panel; backup and extraction commands run in the background so the
 window remains responsive. Wait for an operation to finish before closing.
 
+The connected-device list supports multiple selection (Ctrl/Shift-click).
+Click **Refresh devices** after connecting devices, then **Back up selected devices**
+to start an independent backup process for each selected device. Each job has its
+own progress bar and result; a failed or disconnected device does not stop other
+jobs. Devices already backing up are skipped when starting another selection.
+Passwords remain available through **Saved passwords** during all jobs. USB and
+disk bandwidth are shared between simultaneous backups.
+
 Use **Scan for backups** to search the Finder backup folder on macOS or your home
 folder on other systems. **Scan a folder…** lets you choose another folder or
 mounted drive. Scans run in the background and open a results window. Select one
@@ -76,6 +84,15 @@ component, not a package installed by `pip install -r requirements.txt`.
 The GUI uses the same local database and backup folders as the CLI. Stored backup
 passwords are plaintext in SQLite; protect access to the project directory. The
 GUI masks password input and hides generated passwords from its activity panel.
+Use **Saved passwords**, then **Show passwords** or **Copy**, to retrieve a saved
+device password, including during a running backup or after a failed attempt.
+New passwords are committed to `iphonetools.db` before the tool attempts to enable
+encryption on the device, and are reused on retries. If the connection fails while
+enabling encryption, the saved value is the attempted password; the device may
+or may not have accepted it. Completed backups are registered separately.
+The progress bar animates during preparation and displays the device's reported
+percentage during backup. Updates may pause while the device processes files;
+completion is confirmed in the activity panel.
 
 ## Commands
 
@@ -85,13 +102,21 @@ GUI masks password input and hides generated passwords from its activity panel.
 python3 main.py backup
 ```
 
-Connects to the device, generates a random 32-character hex encryption password, enables backup encryption on the device, and runs a full backup. The password is stored in `iphonetools.db` alongside device metadata. Backups are saved under `backups/<timestamp>/<UDID>/`.
+Connects to the device and, if encryption is off, generates a random 32-character
+hex encryption password and saves it in `iphonetools.db` before enabling encryption.
+It then runs a full backup. Completed backup metadata is saved after success.
+Backups are saved under `backups/<timestamp>/<UDID>/`.
 
 **Options:**
 
 | Flag | Description |
 |---|---|
 | `--incremental` | Run an incremental backup instead of a full one |
+| `--udid ID` | Select a specific connected USB device |
+
+Run `python3 main.py list-devices` to list connected USB devices and identifiers
+as JSON. Separate CLI processes can back up different `--udid` values concurrently;
+each run creates a unique session directory.
 
 **Notes:**
 - iOS keeps a single backup password per device. Once encryption is enabled, all subsequent backups use the same password until it is changed.
